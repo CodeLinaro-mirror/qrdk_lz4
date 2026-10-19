@@ -175,6 +175,13 @@ LZ4LIB_API int LZ4_compress_HC_continue_destSize(LZ4_streamHC_t* LZ4_streamHCPtr
                                            const char* src, char* dst,
                                                  int* srcSizePtr, int targetDstSize);
 
+/*! LZ4_saveDictHC():
+ * save history content (up to 64 KB) into a user-provided buffer @param safeBuffer.
+ * @return value is the size of dictionary effectively saved (<= MIN(maxDictSize, 64 KB)).
+ * This function is always successful, and expects its arguments to be valid.
+ * To this end, let's remind that (NULL,0) is valid, 
+ * but (NULL,!0) is not, and will result in a segfault (or assert() depending on compilation mode).
+ */
 LZ4LIB_API int LZ4_saveDictHC (LZ4_streamHC_t* streamHCPtr, char* safeBuffer, int maxDictSize);
 
 
@@ -359,6 +366,8 @@ LZ4LIB_STATIC_API void LZ4_setCompressionLevel(
 /*! LZ4_favorDecompressionSpeed() : v1.8.2+ (experimental)
  *  Opt. Parser will favor decompression speed over compression ratio.
  *  Only applicable to levels >= LZ4HC_CLEVEL_OPT_MIN.
+ *  The setting is preserved by LZ4_resetStreamHC_fast() and LZ4_loadDictHC(),
+ *  it is reset by LZ4_initStreamHC().
  */
 LZ4LIB_STATIC_API void LZ4_favorDecompressionSpeed(
     LZ4_streamHC_t* LZ4_streamHCPtr, int favor);

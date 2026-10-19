@@ -221,12 +221,20 @@ LZ4_compressResetStreamHC(const struct compressionParameters* cparams)
     LZ4_attach_HC_dictionary(cparams->LZ4_streamHC, cparams->LZ4_dictStreamHC);
 }
 
+/* same as LZ4F_levelToAcceleration() : capped at LZ4_ACCELERATION_MAX, without overflow */
+static int BMK_levelToAcceleration(int cLevel)
+{
+    if (cLevel >= 0) return 1;
+    if (cLevel < 1 - LZ4_ACCELERATION_MAX) return LZ4_ACCELERATION_MAX;
+    return -cLevel + 1;
+}
+
 static int
 LZ4_compressBlockNoStream(const struct compressionParameters* cparams,
                           const char* src, char* dst,
                           int srcSize, int dstSize)
 {
-    int const acceleration = (cparams->cLevel < 0) ? -cparams->cLevel + 1 : 1;
+    int const acceleration = BMK_levelToAcceleration(cparams->cLevel);
     return LZ4_compress_fast(src, dst, srcSize, dstSize, acceleration);
 }
 
@@ -243,7 +251,7 @@ LZ4_compressBlockStream(const struct compressionParameters* cparams,
                         const char* src, char* dst,
                         int srcSize, int dstSize)
 {
-    int const acceleration = (cparams->cLevel < 0) ? -cparams->cLevel + 1 : 1;
+    int const acceleration = BMK_levelToAcceleration(cparams->cLevel);
     LZ4_compressResetStream(cparams);
     return LZ4_compress_fast_continue(cparams->LZ4_stream, src, dst, srcSize, dstSize, acceleration);
 }
@@ -561,7 +569,7 @@ static int BMK_benchMem(const void* srcBuffer, size_t srcSize,
             }
             markNb = (markNb+1) % NB_MARKS;
             ratio  = (double)totalRSize / (double)cSize;
-            OUTLEVEL(2, "%2s-%-17.17s :%10u ->%10u (%5.3f),%6.1f MB/s, %6.1f MB/s\r",
+            OUTLEVEL(2, "%2s-%-17.17s :%10u ->%10u (%5.3f),%6.1f MB/s,%7.1f MB/s\r",
                     marks[markNb], displayName,
                     (U32)totalRSize, (U32)cSize, ratio,
                     ((double)totalRSize / (double)fastestC) * 1000,
