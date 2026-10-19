@@ -9,7 +9,7 @@ permissions:
 
 concurrency:
   cancel-in-progress: true
-  group: ${{ github.workflow }}-${{ github.head_ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
   qemu-platforms:
@@ -36,7 +36,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Install cross-compilation tools
       run: |
@@ -51,6 +51,10 @@ jobs:
         $XCC -v  # Show built-in specs
         echo "=== QEMU Emulator Information ==="
         type $XEMU && which $XEMU && $XEMU --version
+
+    - name: Freestanding test with non-x86_64 target on x86_64 host
+      # freestanding test must be selected from the compiler's target, not the host (#1464)
+      run: make test-freestanding V=1 CC=$XCC
 
     - name: Run platform tests (ARM/ARM64/PPC/S390X)
       if: contains(fromJSON('["ARM", "ARM64", "PPC", "S390X"]'), matrix.arch)
@@ -69,7 +73,7 @@ jobs:
     runs-on: macos-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Display environment info
       run: |

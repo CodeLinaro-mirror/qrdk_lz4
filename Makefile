@@ -63,7 +63,7 @@ lz4 lz4-release :
 	echo lz4 build completed
 
 .PHONY: examples
-examples: liblz4.a
+examples: lib
 	$(MAKE) -C $(EXDIR) all
 
 .PHONY: manuals
@@ -75,6 +75,7 @@ build_tests:
 	$(MAKE) -C $(TESTDIR) all
 
 .PHONY: clean
+clean: MAKEFLAGS= --no-print-directory
 clean:
 	$(MAKE) -C $(LZ4DIR) $@ > $(VOID)
 	$(MAKE) -C $(PRGDIR) $@ > $(VOID)
@@ -94,6 +95,8 @@ ifeq ($(POSIX_ENV),Yes)
 HOST_OS = POSIX
 
 .PHONY: install uninstall
+# build first, so that `make all install` doesn't run 2 concurrent builds in lib/ and programs/
+install: lib lz4
 install uninstall:
 	$(MAKE) -C $(LZ4DIR) $@
 	$(MAKE) -C $(PRGDIR) $@

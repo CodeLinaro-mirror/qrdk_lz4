@@ -55,6 +55,7 @@ ALL = print_version \
 	  simple_buffer \
 	  frameCompress \
 	  fileCompress \
+	  fileRandomAccess \
       blockStreaming_doubleBuffer \
 	  blockStreaming_ringBuffer \
 	  streamingHC_ringBuffer \
@@ -68,8 +69,9 @@ all: $(ALL)
 $(ALL): $(SLIBLZ4)
 
 .PHONY:$(LZ4)
+$(LZ4): MAKEFLAGS=
 $(LZ4) :
-	$(MAKE) -j -C $(LZ4DIR) lz4
+	$(MAKE) -C $(LZ4DIR) lz4
 
 .PHONY: test
 test : all $(LZ4)
@@ -94,6 +96,8 @@ test : all $(LZ4)
 	@echo "\n=== file compression ==="
 	./fileCompress$(EXT) $(TESTFILE)
 	$(LZ4) -vt $(TESTFILE).lz4
+	@echo "\n=== file random access ==="
+	./fileRandomAccess$(EXT) $(TESTFILE)
 	@echo "\n=== Q&D benchmark ==="
 	./bench_functions$(EXT) 10000
 

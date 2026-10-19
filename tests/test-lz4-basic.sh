@@ -61,16 +61,38 @@ test ! -f ${FPREFIX}-dir.lz4          # must not create artifact (#1211)
 lz4 -f $FPREFIX-hw                    # create $FPREFIX-hw.lz4, for next tests
 lz4 --list $FPREFIX-hw.lz4            # test --list on valid single-frame file
 lz4 --list < $FPREFIX-hw.lz4          # test --list from stdin (file only)
+lz4 --list goldenSamples/dictID.bin  # test --list on a frame carrying a dictID (11-byte header)
+head -c $(( $(wc -c < $FPREFIX-hw.lz4) - 4 )) $FPREFIX-hw.lz4 > $FPREFIX-trunc.lz4
+lz4 --list $FPREFIX-trunc.lz4 && exit 1  # must fail: truncated frame (content checksum missing)
 cat $FPREFIX-hw >> $FPREFIX-hw.lz4
 lz4 -f $FPREFIX-hw.lz4 && exit 1      # uncompress valid frame followed by invalid data (must fail now)
+printf '\120\052\115\030\000\000\000\000BAD!' > $FPREFIX-bad.lz4
+cp $FPREFIX-bad.lz4 $FPREFIX-bad-before.lz4
+lz4 -d --rm -f $FPREFIX-bad.lz4 $FPREFIX-bad.out && exit 1
+diff -q $FPREFIX-bad-before.lz4 $FPREFIX-bad.lz4  # --rm keeps source after decoding failure
 lz4 -BX $FPREFIX-hw -c -q | lz4 -tv   # test block checksum
 # datagen -g20KB generates the same file every single time
 # cannot save output of datagen -g20KB as input file to lz4 because the following shell commands are run before datagen -g20KB
 test "$(datagen -g20KB | lz4 -c --fast | wc -c)" -lt "$(datagen -g20KB | lz4 -c --fast=9 | wc -c)" # -1 vs -9
 test "$(datagen -g20KB | lz4 -c -1 | wc -c)" -lt "$(datagen -g20KB| lz4 -c --fast=1 | wc -c)" # 1 vs -1
 test "$(datagen -g20KB | lz4 -c --fast=1 | wc -c)" -eq "$(datagen -g20KB| lz4 -c --fast| wc -c)" # checks default fast compression is -1
-lz4 -c --fast=0 $FPREFIX-dg20K && exit 1  # lz4 should fail when fast=0
-lz4 -c --fast=-1 $FPREFIX-dg20K && exit 1 # lz4 should fail when fast=-1
+test "$(lz4 -c -l -1 $FPREFIX-dg20k | wc -c)" -lt "$(lz4 -c -l --fast=1 $FPREFIX-dg20k | wc -c)" # same with legacy format
+lz4 -c -l --fast=2147483647 $FPREFIX-dg20k > /dev/null  # legacy format : acceleration capped without overflow
+lz4 -c --fast=0 $FPREFIX-dg20k && exit 1  # lz4 should fail when fast=0
+lz4 -c --fast=-1 $FPREFIX-dg20k && exit 1 # lz4 should fail when fast=-1
+# numeric arguments must not silently overflow
+lz4 -c --fast=3000000000 $FPREFIX-dg20k > /dev/null && exit 1  # > INT_MAX
+lz4 -c --fast=4294967297 $FPREFIX-dg20k > /dev/null && exit 1  # > UINT_MAX (would wrap to 1)
+lz4 -c -3000000000 $FPREFIX-dg20k > /dev/null && exit 1        # > INT_MAX
+lz4 -c -4294967305 $FPREFIX-dg20k > /dev/null && exit 1        # > UINT_MAX (would wrap to 9)
+lz4 -c -T4294967297 $FPREFIX-dg20k > /dev/null && exit 1       # > UINT_MAX (would wrap to 1)
+# an overflowing LZ4_CLEVEL is ignored, like other invalid values
+test "$(LZ4_CLEVEL=4294967305 lz4 -c $FPREFIX-dg20k | wc -c)" -eq "$(lz4 -c $FPREFIX-dg20k | wc -c)"
+# acceleration (--fast=# + 1) is capped at LZ4_ACCELERATION_MAX (65537) :
+# the largest --fast value behaves like --fast=65536, without overflow
+lz4 -c --fast=65536 $FPREFIX-dg20k > $FPREFIX-fastmax.lz4
+lz4 -c --fast=2147483647 $FPREFIX-dg20k | cmp - $FPREFIX-fastmax.lz4
+lz4 -bq --fast=2147483647 -i0 $FPREFIX-dg20k
 # Multithreading commands
 datagen -g16M | lz4 -T2 | lz4 -t
 datagen -g16M | lz4 --threads=2 | lz4 -t
