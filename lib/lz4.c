@@ -2550,6 +2550,7 @@ LZ4_decompress_generic(
             if ((dict==usingExtDict) && (match < lowPrefix)) {
                 assert(dictEnd != NULL);
                 op = LZ4_copyExtDictMatch(op, match, ml, lowPrefix, dictEnd);
+                if (partialDecoding && (op == oend)) { break; }   /* output full : the next sequence may not be there */
                 continue;
             }
             assert(match >= lowPrefix);

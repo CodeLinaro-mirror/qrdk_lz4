@@ -264,6 +264,19 @@ TEST(decompress_safe_partial_usingDict_srcSizeBeyondBlock)
     }
 }
 
+/* a match within an external dictionary fills the output : decoding stops there,
+ * without reading the next sequence, which may not be there (beginning of a block, see LZ4F_decodeProgressive()) */
+TEST(decompress_safe_partial_usingDict_stopsWhenFull)
+{
+    /* match of 4 bytes at offset 10, within the dictionary ; then a token announcing >= 15 literals, cut there */
+    static const char block[4] = { 0x00, 10, 0, (char)0xF0 };
+    static const char dict[16] = "abcdefghijklmno";
+    char decoded[4];
+    ASSERT_EQ(LZ4_decompress_safe_partial_usingDict(block, decoded, (int)sizeof(block), 4, (int)sizeof(decoded),
+                                                    dict, (int)sizeof(dict)), 4);
+    ASSERT_MEMEQ(decoded, dict + sizeof(dict) - 10, 4);
+}
+
 
 /*-************************************
 *  Decoding edge cases
