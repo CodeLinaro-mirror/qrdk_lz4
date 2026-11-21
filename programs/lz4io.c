@@ -2569,7 +2569,7 @@ LZ4IO_decompressLZ4F(dRess_t ress,
 #define NB_BUFFSETS 4 /* 1 being read, 1 being processed, 1 being written, 1 being queued */
     void* inBuffs[NB_BUFFSETS];
     int bSetNb;
-    size_t firstReads = 0;   /* input read so far, up to INBUFF_SIZE : see INBUFF_FIRST_READS */
+    size_t firstReads = MAGICNUMBER_SIZE;   /* input read so far, magic number included, up to INBUFF_SIZE : see INBUFF_FIRST_READS */
 
     /* checks */
     if (tPool == NULL || wPool == NULL || bp==NULL)
@@ -2605,7 +2605,7 @@ LZ4IO_decompressLZ4F(dRess_t ress,
     /* Main Loop */
     assert(nextToLoad);
     for (bSetNb = 0; ; bSetNb = (bSetNb+1) % NB_BUFFSETS) {
-        size_t const toRead = (firstReads < INBUFF_SIZE) ? INBUFF_FIRST_READS : INBUFF_SIZE;
+        size_t const toRead = (firstReads < INBUFF_SIZE) ? INBUFF_FIRST_READS - (firstReads % INBUFF_FIRST_READS) : INBUFF_SIZE;   /* reads end at multiples of their size */
         size_t readSize;
 
         if (TPool_jobError()) break;
