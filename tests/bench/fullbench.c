@@ -392,6 +392,18 @@ static int local_LZ4_decompress_incomplete(const char* in, char* out, int inSize
     if (result < 0) return result;
     return outSize;
 }
+static int local_LZ4_decompress_incomplete_prefix(const char* in, char* out, int inSize, int outSize)
+{
+    int result = LZ4_decompress_incomplete(in, out, &inSize, outSize, out - 65536, 65536);   /* history just before out */
+    if (result < 0) return result;
+    return outSize;
+}
+static int local_LZ4_decompress_incomplete_extDict(const char* in, char* out, int inSize, int outSize)
+{
+    int result = LZ4_decompress_incomplete(in, out, &inSize, outSize, out - 65536, 65535);   /* history 1 byte before out */
+    if (result < 0) return result;
+    return outSize;
+}
 #endif
 
 static int local_LZ4_decompress_safe_partial(const char* in, char* out, int inSize, int outSize)
@@ -576,6 +588,8 @@ static const DecompressionDesc decDescArray[] = {
     { "LZ4F_decompress_noHint", local_LZ4F_decompress_noHint, 1, 1 },
 #ifndef LZ4_DLL_IMPORT
     { "LZ4_decompress_incomplete", local_LZ4_decompress_incomplete, 0, 0 },
+    { "LZ4_decompress_incomplete_prefix", local_LZ4_decompress_incomplete_prefix, 0, 0 },
+    { "LZ4_decompress_incomplete_extDict", local_LZ4_decompress_incomplete_extDict, 0, 0 },
 #endif
 };
 
