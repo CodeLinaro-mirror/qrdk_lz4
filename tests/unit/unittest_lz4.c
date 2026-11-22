@@ -1373,3 +1373,91 @@ TEST(decompress_incomplete_errors)
     ASSERT_EQ(LZ4_decompress_incomplete((const char*)block, decoded, &size, 0, NULL, 0), 0);
     ASSERT_EQ(size, 0);
 }
+
+/* external dictionary, block beyond 64 KB : the first part is decoded with the dictionary, the rest as with a prefix.
+ * The sequence crossing the end of the first part : a long match, or long literals then a match,
+ * whose offset reaches the dictionary's last byte, or the block's first two bytes.
+ * Also in place (input at the end of the output buffer) : the block is decoded again when the prefix decoder fails */
+TEST(decompress_usingDict_extDictBeyond64KB)
+{
+    const char* const dict = (const char*)UT_fixedSample(64 KB);
+    const unsigned char* const literals = (const unsigned char*)UT_fixedNoise(80 KB);
+    unsigned char* const block = (unsigned char*)UT_malloc(100 KB);
+    char* const buffer = (char*)UT_malloc(64 KB + 100 KB);   /* dictionary, then decoded data : reference, as a prefix */
+    char* const ref = buffer + 64 KB;
+    char* const decoded = (char*)UT_malloc(100 KB);
+    int longLiterals, pos, delta;
+    memcpy(buffer, dict, 64 KB);
+    for (longLiterals = 0; longLiterals < 2; longLiterals++)
+    for (pos = (int)(64 KB) - 700; pos <= (int)(64 KB) + 600; pos += 37)
+    for (delta = -1; delta <= 1; delta++) {
+        size_t const ll = longLiterals ? 1000 : 0;
+        size_t const ml = longLiterals ? 4 : 2000;
+        unsigned const offset = (unsigned)MIN(pos + (int)ll + delta, LZ4_DISTANCE_MAX);   /* delta 1 : dictionary's last byte */
+        int const outSize = pos + (int)(ll + ml) + 100;
+        size_t n = writeSequence(block, literals, (size_t)pos - 4, 4, 4);   /* ends at pos */
+        int extra;
+        n += writeSequence(block + n, literals + 70 KB, ll, offset, ml);
+        n += writeSequence(block + n, literals + 72 KB, 100, 0, 0);
+        ASSERT_EQ(LZ4_decompress_safe_usingDict((const char*)block, ref, (int)n, outSize, buffer, 64 KB), outSize);
+        for (extra = 0; extra <= 1000; extra += 1000) {
+            memset(decoded, 0, 100 KB);
+            ASSERT_MSG(LZ4_decompress_safe_usingDict((const char*)block, decoded, (int)n, outSize + extra, dict, 64 KB) == outSize
+                       && !memcmp(decoded, ref, (size_t)outSize),
+                       "long %s, position %i, offset %u : decoding failed or corrupted", longLiterals ? "literals" : "match", pos, offset);
+        }
+        if (!longLiterals) {   /* in place : compressed size < decoded size */
+            size_t const inPlaceSize = (size_t)outSize + LZ4_DECOMPRESS_INPLACE_MARGIN(n);
+            ASSERT(inPlaceSize <= 100 KB);
+            memcpy(decoded + inPlaceSize - n, block, n);
+            ASSERT_MSG(LZ4_decompress_safe_usingDict(decoded + inPlaceSize - n, decoded, (int)n, outSize, dict, 64 KB) == outSize
+                       && !memcmp(decoded, ref, (size_t)outSize),
+                       "in place, position %i, offset %u : decoding failed or corrupted", pos, offset);
+        }
+    }
+    /* the output too small, the dictionary too small */
+    {   size_t n = writeSequence(block, literals, 64 KB - 100, 4, 4);
+        int const outSize = 64 KB - 96 + 2000 + 100;
+        n += writeSequence(block + n, literals, 0, 65535, 2000);   /* starts 95 bytes before the block */
+        n += writeSequence(block + n, literals, 100, 0, 0);
+        ASSERT_EQ(LZ4_decompress_safe_usingDict((const char*)block, decoded, (int)n, outSize, dict, 64 KB), outSize);
+        ASSERT_EQ(LZ4_decompress_safe_usingDict((const char*)block, decoded, (int)n, outSize - 1, dict, 64 KB), -2);
+        ASSERT_EQ(LZ4_decompress_safe_usingDict((const char*)block, decoded, (int)n, outSize, dict + 64 KB - 95, 95), outSize);
+        ASSERT_EQ(LZ4_decompress_safe_usingDict((const char*)block, decoded, (int)n, outSize, dict + 64 KB - 94, 94), -3);
+    }
+}
+
+/* ring buffer with blocks beyond 64 KB, restarting at its beginning : the dictionary lies within the output buffer,
+ * overwritten as decoding goes on. A block referencing the dictionary at its beginning (oldest byte),
+ * then with a long match crossing 64 KB (dictionary's last byte) : decoded as without a ring */
+TEST(decompress_safe_continue_ringLargeBlocks)
+{
+    int const maxBlockSize = 128 KB;
+    int const ringSize = LZ4_decoderRingBufferSize(maxBlockSize);
+    int const firstPassSize = ringSize - (maxBlockSize - 1);   /* next block restarts at the beginning */
+    const char* const src = (const char*)UT_fixedSample((size_t)firstPassSize);
+    const unsigned char* const literals = (const unsigned char*)UT_fixedNoise(70 KB);
+    int const capacity = LZ4_COMPRESSBOUND(firstPassSize);
+    char* const cBuffer = (char*)UT_malloc((size_t)capacity);
+    char* const ring = (char*)UT_malloc((size_t)ringSize);
+    char* const buffer = (char*)UT_malloc(64 KB + 70 KB);   /* end of the first pass, then the block : reference, as a prefix */
+    unsigned char* const block = (unsigned char*)UT_malloc(70 KB);
+    int const cSize = LZ4_compress_default(src, cBuffer, firstPassSize, capacity);
+    int pos;
+    ASSERT(cSize > 0);
+    memcpy(buffer, src + firstPassSize - 64 KB, 64 KB);
+    for (pos = (int)(64 KB) - 2; pos >= (int)(64 KB) - 600; pos -= 37) {
+        LZ4_streamDecode_t sd;
+        int const outSize = pos + 2000 + 100;
+        size_t n = writeSequence(block, literals, 100, 65535, 4);   /* the dictionary's oldest byte */
+        n += writeSequence(block + n, literals + 100, (size_t)pos - 108, 4, 4);   /* ends at pos */
+        n += writeSequence(block + n, literals, 0, (unsigned)pos + 1, 2000);   /* the dictionary's last byte */
+        n += writeSequence(block + n, literals + 1 KB, 100, 0, 0);
+        ASSERT_EQ(LZ4_decompress_safe_usingDict((const char*)block, buffer + 64 KB, (int)n, outSize, buffer, 64 KB), outSize);
+        LZ4_setStreamDecode(&sd, NULL, 0);
+        ASSERT_EQ(LZ4_decompress_safe_continue(&sd, cBuffer, ring, cSize, firstPassSize), firstPassSize);
+        ASSERT_MSG(LZ4_decompress_safe_continue(&sd, (const char*)block, ring, (int)n, maxBlockSize) == outSize
+                   && !memcmp(ring, buffer + 64 KB, (size_t)outSize),
+                   "position %i : decoding failed or corrupted", pos);
+    }
+}

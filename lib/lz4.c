@@ -2684,11 +2684,10 @@ static int LZ4_decompress_safe_partial_withSmallPrefix(const char* source, char*
 }
 
 LZ4_FORCE_O2
-int LZ4_decompress_safe_forceExtDict(const char* source, char* dest,
+static int LZ4_decompress_safe_extDict(const char* source, char* dest,
                                      int compressedSize, int maxOutputSize,
                                      const void* dictStart, size_t dictSize)
 {
-    DEBUGLOG(5, "LZ4_decompress_safe_forceExtDict");
     return LZ4_decompress_generic(source, dest, compressedSize, maxOutputSize,
                                   decode_full_block, usingExtDict,
                                   (BYTE*)dest, (const BYTE*)dictStart, dictSize,
@@ -2768,6 +2767,41 @@ int LZ4_decompress_incomplete(const char* src, char* dst, int* srcSizePtr, int d
     }
     if (decodedSize >= 0) *srcSizePtr = (int)(srcEnd - src);
     return decodedSize;
+}
+
+/* [start, start+size) doesn't overlap the output buffer */
+static int LZ4_outsideOutput(const void* start, size_t size, const char* dst, int dstCapacity)
+{
+    return ((uptrval)start + size <= (uptrval)dst) || ((uptrval)start >= (uptrval)dst + (uptrval)dstCapacity);
+}
+
+/* External dictionary : beyond the first 64 KB of the block, no match can reach it (offset <= LZ4_DISTANCE_ABSOLUTE_MAX).
+ * So the first LZ4_EXTDICT_PART bytes are decoded with the dictionary, and the rest as with a prefix, which is faster.
+ * LZ4_decompress_incomplete_extDict() stops before the first sequence which doesn't fit : its literals end beyond
+ * (LZ4_EXTDICT_PART - MFLIMIT), or its match beyond (LZ4_EXTDICT_PART - LASTLITERALS) : any later match starts beyond 64 KB.
+ * Rarely, this sequence reaches the dictionary : the prefix decoder, which checks offsets, fails.
+ * Then, as on any error, the block is decoded again with the dictionary : same result as before.
+ * Hence dictionary and input must lie outside the output buffer (not a ring buffer, not in place). */
+#define LZ4_EXTDICT_PART (64 KB + 512)
+LZ4_FORCE_O2
+int LZ4_decompress_safe_forceExtDict(const char* source, char* dest,
+                                     int compressedSize, int maxOutputSize,
+                                     const void* dictStart, size_t dictSize)
+{
+    DEBUGLOG(5, "LZ4_decompress_safe_forceExtDict");
+    LZ4_STATIC_ASSERT(LZ4_EXTDICT_PART - MFLIMIT >= LZ4_DISTANCE_ABSOLUTE_MAX);
+    if ( (maxOutputSize > LZ4_EXTDICT_PART)
+      && LZ4_outsideOutput(dictStart, dictSize, dest, maxOutputSize)
+      && LZ4_outsideOutput(source, (size_t)compressedSize, dest, maxOutputSize) ) {
+        const char* srcEnd = source;
+        int const partSize = LZ4_decompress_incomplete_extDict(source, dest, compressedSize, LZ4_EXTDICT_PART,
+                                                               (const char*)dictStart, dictSize, &srcEnd);
+        if (partSize >= 0) {   /* < 0 : invalid parameters */
+            int const r = LZ4_decompress_safe_withSmallPrefix(srcEnd, dest + partSize, compressedSize - (int)(srcEnd - source),
+                                                              maxOutputSize - partSize, (size_t)partSize);
+            if (r >= 0) return partSize + r;
+    }   }
+    return LZ4_decompress_safe_extDict(source, dest, compressedSize, maxOutputSize, dictStart, dictSize);
 }
 
 /*===== streaming decompression functions =====*/
